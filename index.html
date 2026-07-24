@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DUBEL BMX - Sistema de Gestão</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+        @media print { .no-print { display: none !important; } .page-break { page-break-after: always; } }
+        .bg-uci-blue { background-color: #0055a4; }
+        .admin-gradient { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); }
+    </style>
+</head>
+<body class="bg-slate-50 font-sans min-h-screen" x-data="bmxApp()" x-init="init()">
+    
+    <!-- LOADING OVERLAY -->
+    <div x-show="loading" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[200]" x-cloak>
+        <div class="bg-white p-6 rounded-2xl shadow-xl flex items-center gap-4">
+            <div class="animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-t-transparent"></div>
+            <span class="font-black text-slate-800 uppercase tracking-widest">Sincronizando...</span>
+        </div>
+    </div>
+
+    <!-- AUTH MODAL (ADMIN PASSWORD) -->
+    <div x-show="showAuthModal" class="fixed inset-0 bg-slate-900/90 backdrop-blur-md flex items-center justify-center z-[100]" x-cloak>
+        <div class="bg-white p-8 rounded-3xl w-full max-w-sm shadow-2xl text-center">
+            <div class="mb-6">
+                <div class="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <span class="text-3xl">🔐</span>
+                </div>
+                <h3 class="text-xl font-black text-slate-800 uppercase">Área do Administrador</h3>
+                <p class="text-sm text-slate-500 mt-1">Insira a senha para acessar o painel</p>
+            </div>
+            <input type="password" x-model="authPassword" @keyup.enter="login()" placeholder="SENHA" class="w-full border-2 border-slate-100 rounded-xl p-4 text-center font-black mb-4 focus:border-blue-500 outline-none">
+            <div class="flex flex-col gap-2">
+                <button @click="login()" class="w-full bg-blue-600 text-white py-3 rounded-xl font-black shadow-lg hover:bg-blue-700 transition">ENTRAR</button>
+                <button @click="showAuthModal = false" class="w-full text-slate-400 font-bold text-sm py-2">VOLTAR AO MODO PÚBLICO</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CHANGE PASSWORD MODAL -->
+    <div x-show="showChangePasswordModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-[110]" x-cloak>
+        <div class="bg-white p-8 rounded-3xl w-full max-w-md shadow-2xl">
+            <h3 class="text-2xl font-black mb-6 text-slate-800 uppercase">Alterar Senha Admin</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="text-[10px] font-black text-slate-400 uppercase">Nova Senha</label>
+                    <input type="password" x-model="newAdminPassword" class="w-full border-2 border-slate-100 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                </div>
+            </div>
+            <div class="mt-8 flex justify-end gap-3">
+                <button @click="showChangePasswordModal = false" class="px-6 py-2 font-bold text-slate-400">CANCELAR</button>
+                <button @click="changeAdminPassword()" class="bg-blue-600 text-white px-8 py-2 rounded-xl font-black shadow-lg hover:bg-blue-700 transition">ALTERAR SENHA</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- EDIT RIDER MODAL -->
+    <div x-show="showEditRiderModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-[100]" x-cloak>
+        <div class="bg-white p-8 rounded-3xl w-full max-w-md shadow-2xl">
+            <h3 class="text-2xl font-black mb-6 text-slate-800 uppercase">Editar Inscrição</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="text-[10px] font-black text-slate-400 uppercase">Nome Completo</label>
+                    <input type="text" x-model="editingRider.name" class="w-full border-2 border-slate-100 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                </div>
+                <div>
+                    <label class="text-[10px] font-black text-slate-400 uppercase">Número da Placa</label>
+                    <input type="text" x-model="editingRider.plate" class="w-full border-2 border-slate-100 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                </div>
+                <div>
+                    <label class="text-[10px] font-black text-slate-400 uppercase">Equipe / Clube</label>
+                    <input type="text" x-model="editingRider.team" class="w-full border-2 border-slate-100 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                </div>
+                <div>
+                    <label class="text-[10px] font-black text-slate-400 uppercase">Categoria</label>
+                    <select x-model="editingRider.category" class="w-full border-2 border-slate-100 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                        <template x-for="cat in getAvailableCategories()" :key="cat">
+                            <option :value="cat" x-text="cat"></option>
+                        </template>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-8 flex justify-end gap-3">
+                <button @click="showEditRiderModal = false" class="px-6 py-2 font-bold text-slate-400">CANCELAR</button>
+                <button @click="updateRider()" class="bg-blue-600 text-white px-8 py-2 rounded-xl font-black shadow-lg hover:bg-blue-700 transition">SALVAR ALTERAÇÕES</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW EVENT MODAL -->
+    <div x-show="showNewEventModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50" x-cloak>
+        <div class="bg-white p-8 rounded-3xl w-full max-w-md shadow-2xl">
+            <h3 class="text-2xl font-black mb-6 text-slate-800 uppercase">Criar Novo Evento</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="text-[10px] font-black text-slate-400 uppercase">Nome do Evento</label>
+                    <input type="text" x-model="newEvent.name" placeholder="Ex: Campeonato BMX 2024" class="w-full border-2 border-slate-100 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                </div>
+                <div>
+                    <label class="text-[10px] font-black text-slate-400 uppercase">Data do Evento</label>
+                    <input type="date" x-model="newEvent.date" class="w-full border-2 border-slate-100 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                </div>
+            </div>
+            <div class="mt-8 flex justify-end gap-3">
+                <button @click="showNewEventModal = false; newEvent = { name: '', date: '' }" class="px-6 py-2 font-bold text-slate-400">CANCELAR</button>
+                <button @click="createEvent()" class="bg-blue-600 text-white px-8 py-2 rounded-xl font-black shadow-lg hover:bg-blue-700 transition">CRIAR EVENTO</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex flex-col md:flex-row min-h-screen">
+        <!-- Sidebar -->
+        <aside class="w-full md:w-64 bg-slate-900 text-white shadow-xl no-print">
+            <div class="p-6">
+                <h1 class="text-2xl font-black tracking-tighter text-blue-400 italic">DUBEL BMX</h1>
+                <div class="flex items-center gap-2 mt-2">
+                    <span :class="isAdmin ? 'bg-red-500' : 'bg-green-500'" class="w-2 h-2 rounded-full animate-pulse"></span>
+                    <span class="text-[10px] font-black uppercase tracking-widest" x-text="isAdmin ? 'Modo Administrador' : 'Modo Público'"></span>
+                </div>
+            </div>
+
+            <nav class="mt-4 px-4 space-y-2">
+                <!-- PUBLIC NAV -->
+                <button @click="currentView = 'public_events'" :class="currentView === 'public_events' ? 'bg-blue-600 shadow-lg' : 'hover:bg-slate-800'" class="w-full text-left px-4 py-3 rounded-lg transition flex items-center gap-3">
+                    🏁 <span>Eventos Ativos</span>
+                </button>
+
+                <template x-if="activeEvent">
+                    <div class="pt-4 space-y-2 border-t border-slate-800">
+                        <p class="px-4 py-1 text-[10px] font-black text-blue-300 truncate uppercase" x-text="activeEvent.name"></p>
+                        
+                        <button @click="currentView = 'public_riders'" :class="currentView === 'public_riders' ? 'bg-blue-600' : 'hover:bg-slate-800'" class="w-full text-left px-4 py-3 rounded-lg transition flex items-center gap-3">
+                            👥 <span>Inscritos</span>
+                        </button>
+                        <button @click="currentView = 'public_motos'" :class="currentView === 'public_motos' ? 'bg-blue-600' : 'hover:bg-slate-800'" class="w-full text-left px-4 py-3 rounded-lg transition flex items-center gap-3">
+                            🚴 <span>Baterias</span>
+                        </button>
+                        <button @click="currentView = 'public_knockouts'" :class="currentView === 'public_knockouts' ? 'bg-blue-600' : 'hover:bg-slate-800'" class="w-full text-left px-4 py-3 rounded-lg transition flex items-center gap-3">
+                            ⚡ <span>Eliminatórias</span>
+                        </button>
+                        <button @click="currentView = 'public_results'" :class="currentView === 'public_results' ? 'bg-blue-600' : 'hover:bg-slate-800'" class="w-full text-left px-4 py-3 rounded-lg transition flex items-center gap-3">
+                            🏆 <span>Resultados</span>
+                        </button>
+                    </div>
+                </template>
+
+                <!-- ADMIN NAV (Visible only if isAdmin) -->
+                <template x-if="isAdmin">
+                    <div class="pt-8 space-y-2 border-t-2 border-slate-700">
+                        <p class="px-4 py-1 text-[10px] font-black text-red-400 uppercase tracking-widest">Painel Admin</p>
+                        <button @click="currentView = 'admin_events'" :class="currentView === 'admin_events' ? 'bg-red-600' : 'hover:bg-slate-800'" class="w-full text-left px-4 py-3 rounded-lg transition flex items-center gap-3">
+                            ⚙️ <span>Gerenciar Eventos</span>
+                        </button>
+                        <button @click="currentView = 'admin_categories'" :class="currentView === 'admin_categories' ? 'bg-red-600' : 'hover:bg-slate-800'" class="w-full text-left px-4 py-3 rounded-lg transition flex items-center gap-3">
+                            🏷️ <span>Cat. Customizadas</span>
+                        </button>
+                        <button @click="showChangePasswordModal = true" class="w-full text-left px-4 py-3 rounded-lg hover:bg-slate-800 transition flex items-center gap-3">
+                            🔑 <span>Trocar Senha</span>
+                        </button>
+                    </div>
+                </template>
+            </nav>
+
+            <div class="mt-auto p-6 space-y-4">
+                <template x-if="!isAdmin">
+                    <button @click="showAuthModal = true" class="w-full bg-slate-800 text-xs font-black py-3 rounded-xl border border-slate-700 hover:bg-slate-700 transition uppercase tracking-widest">Acesso Admin</button>
+                </template>
+                <template x-if="isAdmin">
+                    <button @click="logout()" class="w-full bg-red-900/50 text-xs font-black py-3 rounded-xl border border-red-800 hover:bg-red-800 transition uppercase tracking-widest">Sair do Admin</button>
+                </template>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 p-4 md:p-8 overflow-y-auto">
+            
+            <!-- VIEW: PUBLIC EVENTS -->
+            <section x-show="currentView === 'public_events'" x-cloak>
+                <div class="mb-12">
+                    <h2 class="text-4xl font-black text-slate-900 uppercase tracking-tighter">Escolha o Evento</h2>
+                    <p class="text-slate-500 font-medium">Selecione um evento para se inscrever ou acompanhar</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    <template x-for="event in events" :key="event.id">
+                        <div class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-2xl hover:-translate-y-1 transition duration-300 cursor-pointer" @click="selectEventPublic(event)">
+                            <div class="p-8">
+                                <div class="flex justify-between items-start mb-4">
+                                    <div class="bg-blue-50 text-blue-600 p-3 rounded-2xl">
+                                        <span class="text-2xl">🏆</span>
+                                    </div>
+                                    <span :class="event.registrations_closed ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'" class="text-[10px] font-black px-3 py-1 rounded-full uppercase" x-text="event.registrations_closed ? 'Inscrições Encerradas' : 'Inscrições Abertas'"></span>
+                                </div>
+                                <h3 class="text-2xl font-black text-slate-900 uppercase leading-tight" x-text="event.name"></h3>
+                                <p class="text-slate-400 font-bold mt-2" x-text="event.date || 'DATA A DEFINIR'"></p>
+                            </div>
+                            <div class="bg-slate-50 px-8 py-4 flex justify-between items-center border-t border-slate-100">
+                                <span class="text-xs font-black text-slate-400 uppercase"><span x-text="event.riders.length"></span> Inscritos</span>
+                                <span class="text-blue-600 font-black text-sm uppercase">Entrar ➔</span>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="events.length === 0">
+                        <div class="col-span-full text-center py-20">
+                            <p class="text-slate-400 text-lg font-bold">Nenhum evento disponível no momento.</p>
+                        </div>
+                    </template>
+                </div>
+            </section>
+
+            <!-- VIEW: PUBLIC RIDERS (Registration + List) -->
+            <section x-show="currentView === 'public_riders'" x-cloak>
+                <div class="flex flex-col lg:flex-row gap-8">
+                    <!-- Registration Form -->
+                    <div class="w-full lg:w-1/3">
+                        <div class="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 sticky top-8">
+                            <h3 class="text-2xl font-black text-slate-900 mb-6 uppercase">Inscrição Online</h3>
+                            
+                            <template x-if="activeEvent?.registrations_closed">
+                                <div class="bg-red-50 border-2 border-red-100 p-6 rounded-2xl text-center">
+                                    <span class="text-4xl mb-4 block">🚫</span>
+                                    <p class="text-red-700 font-black uppercase">Inscrições Encerradas para este evento.</p>
+                                </div>
+                            </template>
+
+                            <template x-if="!activeEvent?.registrations_closed">
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="text-[10px] font-black text-slate-400 uppercase">Nome Completo</label>
+                                        <input type="text" x-model="newRider.name" class="w-full border-2 border-slate-50 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                                    </div>
+                                    <div>
+                                        <label class="text-[10px] font-black text-slate-400 uppercase">Número da Placa</label>
+                                        <input type="text" x-model="newRider.plate" class="w-full border-2 border-slate-50 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                                    </div>
+                                    <div>
+                                        <label class="text-[10px] font-black text-slate-400 uppercase">Equipe / Clube</label>
+                                        <input type="text" x-model="newRider.team" class="w-full border-2 border-slate-50 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                                    </div>
+                                    <div>
+                                        <label class="text-[10px] font-black text-slate-400 uppercase">Categoria</label>
+                                        <select x-model="newRider.category" class="w-full border-2 border-slate-50 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                                            <option value="">SELECIONE...</option>
+                                            <optgroup label="Categorias do Evento">
+                                                <template x-for="cat in getAvailableCategories()" :key="cat">
+                                                    <option :value="cat" x-text="cat"></option>
+                                                </template>
+                                            </optgroup>
+                                        </select>
+                                    </div>
+                                    <button @click="publicRegister()" class="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg hover:bg-blue-700 transition mt-4 uppercase">Confirmar Inscrição</button>
+                                    <p class="text-[10px] text-slate-400 text-center font-bold mt-4 uppercase">Após confirmar, apenas o administrador poderá alterar seus dados.</p>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                    <!-- Riders List -->
+                    <div class="flex-1">
+                        <div class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div class="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                                <h3 class="font-black text-slate-900 uppercase">Pilotos Confirmados</h3>
+                                <span class="bg-blue-600 text-white text-[10px] font-black px-3 py-1 rounded-full" x-text="activeEvent?.riders.length || 0"></span>
+                            </div>
+                            <table class="w-full text-left">
+                                <thead class="bg-slate-50 border-b border-slate-100">
+                                    <tr class="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                        <th class="p-4">Placa</th>
+                                        <th class="p-4">Nome</th>
+                                        <th class="p-4">Equipe</th>
+                                        <th class="p-4">Categoria</th>
+                                        <template x-if="isAdmin">
+                                            <th class="p-4 text-right">Ações</th>
+                                        </template>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-50">
+                                    <template x-for="(rider, index) in activeEvent?.riders || []" :key="rider.plate + rider.name">
+                                        <tr class="hover:bg-blue-50/20 transition">
+                                            <td class="p-4 font-black text-blue-600" x-text="rider.plate"></td>
+                                            <td class="p-4 font-bold text-slate-800" x-text="rider.name"></td>
+                                            <td class="p-4 font-medium text-slate-400 text-sm" x-text="rider.team || '---'"></td>
+                                            <td class="p-4"><span class="bg-blue-50 text-blue-700 px-2 py-1 rounded text-[10px] font-black uppercase" x-text="rider.category"></span></td>
+                                            <template x-if="isAdmin">
+                                                <td class="p-4 text-right">
+                                                    <div class="flex justify-end gap-2">
+                                                        <button @click="editRider(index)" class="text-blue-600 hover:text-blue-800 p-1">✏️</button>
+                                                        <button @click="deleteRider(index)" class="text-red-600 hover:text-red-800 p-1">🗑️</button>
+                                                    </div>
+                                                </td>
+                                            </template>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW: PUBLIC MOTOS (Baterias) -->
+            <section x-show="currentView === 'public_motos'" x-cloak>
+                <div class="flex justify-between items-center mb-8 no-print">
+                    <h2 class="text-3xl font-black text-slate-900 uppercase">Baterias (Motos)</h2>
+                    <div class="flex gap-2">
+                        <template x-if="isAdmin">
+                            <button @click="generateMotos()" class="bg-red-600 text-white px-6 py-2 rounded-xl font-black shadow-lg hover:bg-red-700 transition uppercase text-sm">Gerar Baterias</button>
+                        </template>
+                        <button onclick="window.print()" class="bg-slate-800 text-white px-6 py-2 rounded-xl font-black shadow-lg hover:bg-slate-700 transition uppercase text-sm">Imprimir</button>
+                    </div>
+                </div>
+
+                <div class="space-y-12">
+                    <template x-for="round in [1, 2, 3]" :key="round">
+                        <div>
+                            <div class="bg-uci-blue text-white p-4 rounded-t-3xl flex justify-between items-center">
+                                <h3 class="text-xl font-black uppercase tracking-widest">Round <span x-text="round"></span></h3>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 p-6 bg-white border-x border-b border-slate-200 rounded-b-3xl">
+                                <template x-for="moto in activeEvent?.motos.filter(m => m.round === round)" :key="moto.heatNumber">
+                                    <div class="border-2 border-slate-100 rounded-2xl overflow-hidden">
+                                        <div class="bg-slate-900 text-white p-3 flex justify-between items-center">
+                                            <span class="text-xs font-black uppercase" x-text="moto.category"></span>
+                                            <span class="bg-blue-600 px-2 py-0.5 rounded text-[10px] font-black">#<span x-text="moto.heatNumber"></span></span>
+                                        </div>
+                                        <table class="w-full text-xs table-fixed">
+                                            <thead class="bg-slate-50 border-b border-slate-100">
+                                                <tr class="text-[9px] font-black text-slate-400 uppercase">
+                                                    <th class="p-2 text-center w-8">Raia</th>
+                                                    <th class="p-2 w-12">Placa</th>
+                                                    <th class="p-2">Piloto</th>
+                                                    <th class="p-2 text-center w-12">Res</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-slate-50">
+                                                <template x-for="(rider, idx) in moto.riders" :key="rider.plate">
+                                                    <tr>
+                                                        <td class="p-2 text-center font-black text-slate-300" x-text="idx + 1"></td>
+                                                        <td class="p-2 font-black text-blue-600" x-text="rider.plate"></td>
+                                                        <td class="p-2 font-bold text-slate-700 truncate" x-text="rider.name"></td>
+                                                        <td class="p-1">
+                                                            <input type="number" x-model.number="rider.result" :disabled="!isAdmin" class="w-full text-center font-black border rounded p-1 focus:border-blue-500 outline-none" @change="saveResults()">
+                                                        </td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </template>
+                            </div>
+                            <div class="page-break"></div>
+                        </div>
+                    </template>
+                </div>
+            </section>
+
+            <!-- VIEW: PUBLIC KNOCKOUTS (Eliminatórias) -->
+            <section x-show="currentView === 'public_knockouts'" x-cloak>
+                <div class="flex justify-between items-center mb-8 no-print">
+                    <h2 class="text-3xl font-black text-slate-900 uppercase">Eliminatórias</h2>
+                    <div class="flex gap-2">
+                        <template x-if="isAdmin">
+                            <button @click="generateNextPhase()" class="bg-red-600 text-white px-6 py-2 rounded-xl font-black shadow-lg hover:bg-red-700 transition uppercase text-sm">Gerar Próxima Fase</button>
+                        </template>
+                        <button onclick="window.print()" class="bg-slate-800 text-white px-6 py-2 rounded-xl font-black shadow-lg hover:bg-slate-700 transition uppercase text-sm">Imprimir</button>
+                    </div>
+                </div>
+
+                <div class="space-y-12">
+                    <template x-for="phase in ['Quartas', 'Semi', 'Final']" :key="phase">
+                        <template x-if="activeEvent?.knockouts.some(k => k.phase === phase)">
+                            <div>
+                                <div class="bg-slate-900 text-white p-4 rounded-t-3xl">
+                                    <h3 class="text-xl font-black uppercase tracking-widest" x-text="phase"></h3>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 p-6 bg-white border-x border-b border-slate-200 rounded-b-3xl">
+                                    <template x-for="moto in activeEvent?.knockouts.filter(k => k.phase === phase)" :key="moto.heatNumber">
+                                        <div class="border-2 border-slate-100 rounded-2xl overflow-hidden">
+                                            <div class="bg-blue-600 text-white p-3 flex justify-between items-center">
+                                                <span class="text-xs font-black uppercase" x-text="moto.category"></span>
+                                                <span class="bg-slate-900 px-2 py-0.5 rounded text-[10px] font-black">#<span x-text="moto.heatNumber"></span></span>
+                                            </div>
+                                            <table class="w-full text-xs table-fixed">
+                                                <thead class="bg-slate-50 border-b border-slate-100">
+                                                    <tr class="text-[9px] font-black text-slate-400 uppercase">
+                                                        <th class="p-2 text-center w-8">Raia</th>
+                                                        <th class="p-2 w-12">Placa</th>
+                                                        <th class="p-2">Piloto</th>
+                                                        <th class="p-2 text-center w-12">Res</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody class="divide-y divide-slate-50">
+                                                    <template x-for="(rider, idx) in moto.riders" :key="rider.plate">
+                                                        <tr>
+                                                            <td class="p-2 text-center font-black text-slate-300" x-text="idx + 1"></td>
+                                                            <td class="p-2 font-black text-blue-600" x-text="rider.plate"></td>
+                                                            <td class="p-2 font-bold text-slate-700 truncate" x-text="rider.name"></td>
+                                                            <td class="p-1">
+                                                                <input type="number" x-model.number="rider.result" :disabled="!isAdmin" class="w-full text-center font-black border rounded p-1 focus:border-blue-500 outline-none" @change="saveResults()">
+                                                            </td>
+                                                        </tr>
+                                                    </template>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </template>
+                                </div>
+                                <div class="page-break"></div>
+                            </div>
+                        </template>
+                    </template>
+                </div>
+            </section>
+
+            <!-- VIEW: PUBLIC RESULTS -->
+            <section x-show="currentView === 'public_results'" x-cloak>
+                <div class="mb-8 flex justify-between items-center no-print">
+                    <h2 class="text-3xl font-black text-slate-900 uppercase">Resultados Finais</h2>
+                    <button onclick="window.print()" class="bg-slate-800 text-white px-6 py-2 rounded-xl font-black shadow-lg hover:bg-slate-700 transition uppercase text-sm">Imprimir</button>
+                </div>
+
+                <div class="space-y-8">
+                    <template x-for="cat in getActiveCategories()" :key="cat">
+                        <template x-if="hasFinalResults(cat) || isAdmin">
+                            <div class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div class="bg-slate-50 p-6 border-b border-slate-100 flex justify-between items-center">
+                                    <h3 class="text-xl font-black text-slate-900 uppercase" x-text="cat"></h3>
+                                    <template x-if="!hasFinalResults(cat)">
+                                        <span class="text-[10px] bg-amber-100 text-amber-700 px-3 py-1 rounded-full font-black uppercase">Resultados Parciais (Apenas Admin)</span>
+                                    </template>
+                                </div>
+                                <table class="w-full text-left">
+                                    <thead class="bg-slate-50/50">
+                                        <tr class="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                            <th class="p-4 w-16">Pos</th>
+                                            <th class="p-4">Piloto</th>
+                                            <th class="p-4">Placa</th>
+                                            <th class="p-4">Equipe</th>
+                                            <th class="p-4">Fase</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-50">
+                                        <template x-for="(rider, index) in calculateCategoryRankings(cat)" :key="rider.plate">
+                                            <tr class="hover:bg-blue-50/20 transition">
+                                                <td class="p-4 font-black">
+                                                    <template x-if="index === 0"><span class="text-2xl">🥇</span></template>
+                                                    <template x-if="index === 1"><span class="text-2xl">🥈</span></template>
+                                                    <template x-if="index === 2"><span class="text-2xl">🥉</span></template>
+                                                    <template x-if="index > 2"><span class="text-slate-400" x-text="index + 1"></span></template>
+                                                </td>
+                                                <td class="p-4 font-bold text-slate-800" x-text="rider.name"></td>
+                                                <td class="p-4 font-black text-blue-600" x-text="rider.plate"></td>
+                                                <td class="p-4 font-medium text-slate-400 text-sm" x-text="rider.team"></td>
+                                                <td class="p-4">
+                                                    <span class="text-[10px] font-black px-2 py-1 rounded uppercase" :class="rider.lastPhase === 'FINAL' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'" x-text="rider.lastPhase"></span>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </template>
+                    </template>
+                    
+                    <template x-if="getActiveCategories().length > 0 && !getActiveCategories().some(cat => hasFinalResults(cat)) && !isAdmin">
+                        <div class="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200">
+                            <span class="text-6xl mb-4 block">⏳</span>
+                            <h3 class="text-xl font-black text-slate-800 uppercase">Aguardando Resultados Finais</h3>
+                            <p class="text-slate-500">Os resultados oficiais serão exibidos assim que as finais forem concluídas.</p>
+                        </div>
+                    </template>
+                </div>
+            </section>
+
+            <!-- VIEW: ADMIN EVENTS -->
+            <section x-show="currentView === 'admin_events'" x-cloak>
+                <div class="flex justify-between items-center mb-8">
+                    <h2 class="text-3xl font-black text-slate-900 uppercase">Gerenciar Eventos</h2>
+                    <button @click="showNewEventModal = true" class="bg-blue-600 text-white px-6 py-2 rounded-xl font-black shadow-lg hover:bg-blue-700 transition uppercase text-sm">+ Novo Evento</button>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4">
+                    <template x-for="event in events" :key="event.id">
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex justify-between items-center">
+                            <div>
+                                <div class="flex items-center gap-3">
+                                    <h3 class="text-xl font-black text-slate-800 uppercase" x-text="event.name"></h3>
+                                    <span :class="event.registrations_closed ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'" class="text-[10px] font-black px-2 py-0.5 rounded uppercase" x-text="event.registrations_closed ? 'Fechado' : 'Aberto'"></span>
+                                </div>
+                                <p class="text-sm text-slate-400 font-bold" x-text="event.date"></p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button @click="toggleRegistrations(event)" :class="event.registrations_closed ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'" class="px-4 py-2 rounded-lg font-black text-xs uppercase transition" x-text="event.registrations_closed ? 'Abrir Inscrições' : 'Fechar Inscrições'"></button>
+                                <button @click="selectEventAdmin(event)" class="bg-slate-100 text-slate-600 px-4 py-2 rounded-lg font-black text-xs uppercase hover:bg-slate-200 transition">Gerenciar</button>
+                                <button @click="deleteEvent(event.id)" class="bg-red-50 text-red-600 px-4 py-2 rounded-lg font-black text-xs uppercase hover:bg-red-100 transition">Excluir</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </section>
+
+            <!-- VIEW: ADMIN CUSTOM CATEGORIES -->
+            <section x-show="currentView === 'admin_categories'" x-cloak>
+                <div class="mb-8">
+                    <h2 class="text-3xl font-black text-slate-900 uppercase">Categorias Customizadas</h2>
+                </div>
+                
+                <div class="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 max-w-md">
+                    <div class="flex gap-2 mb-6">
+                        <input type="text" x-model="customCatName" placeholder="NOME DA CATEGORIA" class="flex-1 border-2 border-slate-100 rounded-xl p-4 font-bold bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition">
+                        <button @click="addCustomCategory()" class="bg-blue-600 text-white px-6 rounded-xl font-black shadow-lg hover:bg-blue-700 transition">ADD</button>
+                    </div>
+                    <div class="space-y-2">
+                        <template x-for="(cat, index) in customCategories" :key="index">
+                            <div class="flex justify-between items-center p-4 bg-slate-50 rounded-xl border border-slate-100">
+                                <span class="font-black text-slate-700 uppercase" x-text="cat"></span>
+                                <button @click="removeCustomCategory(index)" class="text-red-500 font-black hover:text-red-700">REMOVER</button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script>
+        // CONFIGURAÇÃO SUPABASE
+        const SUPABASE_URL = 'https://tuxcphciucmxpgefzyyr.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_FcAin5W22qy_zYFDRa9ohQ_pgAGSvD0';
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        function bmxApp() {
+            return {
+                isAdmin: false,
+                loading: false,
+                authPassword: '',
+                newAdminPassword: '',
+                adminPassword: 'admin123', // Senha padrão inicial
+                showAuthModal: false,
+                showNewEventModal: false,
+                showEditRiderModal: false,
+                showChangePasswordModal: false,
+                currentView: 'public_events',
+                events: [],
+                activeEvent: null,
+                newEvent: { name: '', date: '' },
+                newRider: { name: '', plate: '', category: '', team: '' },
+                editingRider: { index: null, name: '', plate: '', category: '', team: '' },
+                customCategories: [],
+                customCatName: '',
+                uciCategories: {
+                    championship: ["Elite Men", "Elite Women", "Under 23 Men", "Under 23 Women", "Junior Men", "Junior Women"],
+                    challenge: ["Boys 5-6", "Boys 7", "Boys 8", "Boys 9", "Boys 10", "Boys 11", "Boys 12", "Boys 13", "Boys 14", "Boys 15", "Boys 16", "Men 17-24", "Men 25-29", "Men 30-34", "Men 35+", "Girls 5-8", "Girls 9", "Girls 10", "Girls 11", "Girls 12", "Girls 13", "Girls 14", "Girls 15", "Girls 16", "Women 17-24", "Women 25+"],
+                    cruiser: ["Cruiser Boys 12-", "Cruiser Boys 13-14", "Cruiser Boys 15-16", "Cruiser Men 17-24", "Cruiser Men 25-29", "Cruiser Men 30-34", "Cruiser Men 35-39", "Cruiser Men 40-44", "Cruiser Men 45-49", "Cruiser Men 50+", "Cruiser Girls 12-", "Cruiser Girls 13-16", "Cruiser Women 17-29", "Cruiser Women 30-39", "Cruiser Women 40+"]
+                },
+
+                async init() {
+                    if (localStorage.getItem('bmx_admin_session') === 'true') {
+                        this.isAdmin = true;
+                    }
+                    await this.loadData();
+                    
+                    // Realtime subscription
+                    supabaseClient
+                        .channel('public:events')
+                        .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, payload => this.loadData())
+                        .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, payload => this.loadData())
+                        .subscribe();
+                },
+
+                async loadData() {
+                    this.loading = true;
+                    try {
+                        const { data: eventsData, error: eventsError } = await supabaseClient
+                            .from('events')
+                            .select('*')
+                            .order('created_at', { ascending: false });
+                        
+                        if (eventsError) throw eventsError;
+                        this.events = eventsData || [];
+
+                        const { data: settingsData, error: settingsError } = await supabaseClient
+                            .from('settings')
+                            .select('*');
+                        
+                        if (!settingsError && settingsData) {
+                            const cats = settingsData.find(s => s.key === 'custom_categories');
+                            if (cats) this.customCategories = cats.value;
+                            
+                            const pass = settingsData.find(s => s.key === 'admin_password');
+                            if (pass) {
+                                // Se for objeto JSON, tenta pegar o valor, senão usa o valor direto
+                                this.adminPassword = (typeof pass.value === 'string') ? pass.value : JSON.stringify(pass.value).replace(/"/g, '');
+                            }
+                        }
+
+                        if (this.activeEvent) {
+                            const found = this.events.find(e => e.id === this.activeEvent.id);
+                            if (found) this.activeEvent = found;
+                        }
+                    } catch (e) {
+                        console.error("Erro ao carregar dados:", e);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async login() {
+                    // Verificação mais flexível para evitar erros de tipo
+                    if (this.authPassword.toString().trim() === this.adminPassword.toString().trim()) {
+                        this.isAdmin = true;
+                        this.showAuthModal = false;
+                        this.authPassword = '';
+                        localStorage.setItem('bmx_admin_session', 'true');
+                    } else {
+                        alert('Senha incorreta!');
+                    }
+                },
+
+                async changeAdminPassword() {
+                    if (!this.newAdminPassword) return;
+                    this.loading = true;
+                    const { error } = await supabaseClient
+                        .from('settings')
+                        .upsert({ key: 'admin_password', value: this.newAdminPassword });
+                    
+                    if (error) alert(error.message);
+                    else {
+                        this.adminPassword = this.newAdminPassword;
+                        this.newAdminPassword = '';
+                        this.showChangePasswordModal = false;
+                        alert('Senha alterada com sucesso!');
+                    }
+                    this.loading = false;
+                },
+
+                logout() {
+                    this.isAdmin = false;
+                    this.currentView = 'public_events';
+                    localStorage.removeItem('bmx_admin_session');
+                },
+
+                async createEvent() {
+                    if (!this.newEvent.name || this.newEvent.name.trim() === '') {
+                        alert('Digite um nome para o evento!');
+                        return;
+                    }
+                    this.loading = true;
+                    const { error } = await supabaseClient
+                        .from('events')
+                        .insert([{
+                            name: this.newEvent.name,
+                            date: this.newEvent.date,
+                            riders: [],
+                            motos: [],
+                            knockouts: [],
+                            registrations_closed: false
+                        }]);
+                    
+                    if (error) {
+                        alert('Erro ao criar evento: ' + error.message);
+                    } else {
+                        this.newEvent = { name: '', date: '' };
+                        this.showNewEventModal = false;
+                        await this.loadData();
+                    }
+                    this.loading = false;
+                },
+
+                async toggleRegistrations(event) {
+                    this.loading = true;
+                    const { error } = await supabaseClient
+                        .from('events')
+                        .update({ registrations_closed: !event.registrations_closed })
+                        .eq('id', event.id);
+                    
+                    if (error) alert(error.message);
+                    else await this.loadData();
+                    this.loading = false;
+                },
+
+                selectEventPublic(event) {
+                    this.activeEvent = event;
+                    this.currentView = 'public_riders';
+                },
+
+                selectEventAdmin(event) {
+                    this.activeEvent = event;
+                    this.currentView = 'public_motos';
+                },
+
+                async deleteEvent(id) {
+                    if (confirm('EXCLUIR EVENTO?')) {
+                        this.loading = true;
+                        const { error } = await supabaseClient.from('events').delete().eq('id', id);
+                        if (error) alert(error.message);
+                        else await this.loadData();
+                        this.loading = false;
+                    }
+                },
+
+                getAvailableCategories() {
+                    let cats = [];
+                    Object.values(this.uciCategories).forEach(group => cats = [...cats, ...group]);
+                    return [...cats, ...this.customCategories];
+                },
+
+                async addCustomCategory() {
+                    if (this.customCatName && this.customCatName.trim() !== '') {
+                        this.loading = true;
+                        const newCats = [...this.customCategories, this.customCatName];
+                        const { error } = await supabaseClient
+                            .from('settings')
+                            .upsert({ key: 'custom_categories', value: newCats });
+                        
+                        if (error) alert(error.message);
+                        else {
+                            this.customCategories = newCats;
+                            this.customCatName = '';
+                        }
+                        this.loading = false;
+                    }
+                },
+
+                async removeCustomCategory(idx) {
+                    this.loading = true;
+                    const newCats = [...this.customCategories];
+                    newCats.splice(idx, 1);
+                    const { error } = await supabaseClient
+                        .from('settings')
+                        .upsert({ key: 'custom_categories', value: newCats });
+                    
+                    if (error) alert(error.message);
+                    else this.customCategories = newCats;
+                    this.loading = false;
+                },
+
+                async publicRegister() {
+                    if (this.activeEvent.registrations_closed) {
+                        alert('Inscrições encerradas!');
+                        return;
+                    }
+                    if (!this.newRider.name || !this.newRider.plate || !this.newRider.category) {
+                        alert('Preencha todos os campos obrigatórios!');
+                        return;
+                    }
+                    this.loading = true;
+                    const updatedRiders = [...this.activeEvent.riders, { ...this.newRider }];
+                    const { error } = await supabaseClient
+                        .from('events')
+                        .update({ riders: updatedRiders })
+                        .eq('id', this.activeEvent.id);
+                    
+                    if (error) alert(error.message);
+                    else {
+                        this.newRider = { name: '', plate: '', category: '', team: '' };
+                        await this.loadData();
+                        alert('Inscrição realizada com sucesso!');
+                    }
+                    this.loading = false;
+                },
+
+                editRider(index) {
+                    const rider = this.activeEvent.riders[index];
+                    this.editingRider = { index: index, ...JSON.parse(JSON.stringify(rider)) };
+                    this.showEditRiderModal = true;
+                },
+
+                async updateRider() {
+                    if (this.editingRider.index !== null) {
+                        this.loading = true;
+                        const { index, ...riderData } = this.editingRider;
+                        const updatedRiders = [...this.activeEvent.riders];
+                        updatedRiders[index] = riderData;
+                        
+                        const { error } = await supabaseClient
+                            .from('events')
+                            .update({ riders: updatedRiders })
+                            .eq('id', this.activeEvent.id);
+                        
+                        if (error) alert(error.message);
+                        else {
+                            this.showEditRiderModal = false;
+                            await this.loadData();
+                        }
+                        this.loading = false;
+                    }
+                },
+
+                async deleteRider(index) {
+                    if (confirm('EXCLUIR INSCRIÇÃO?')) {
+                        this.loading = true;
+                        const updatedRiders = [...this.activeEvent.riders];
+                        updatedRiders.splice(index, 1);
+                        
+                        const { error } = await supabaseClient
+                            .from('events')
+                            .update({ riders: updatedRiders })
+                            .eq('id', this.activeEvent.id);
+                        
+                        if (error) alert(error.message);
+                        else await this.loadData();
+                        this.loading = false;
+                    }
+                },
+
+                async generateMotos() {
+                    if (!this.activeEvent || this.activeEvent.riders.length === 0) {
+                        alert('Adicione pilotos primeiro!');
+                        return;
+                    }
+                    if (this.activeEvent.motos.length > 0 && !confirm('Reiniciar baterias?')) return;
+                    
+                    this.loading = true;
+                    let allMotos = [];
+                    const grouped = this.groupBy(this.activeEvent.riders, 'category');
+                    const sortedCategories = Object.keys(grouped).sort();
+                    let globalHeatCounter = 1;
+
+                    for (let round = 1; round <= 3; round++) {
+                        sortedCategories.forEach(cat => {
+                            const riders = grouped[cat];
+                            const numHeats = Math.ceil(riders.length / 8);
+                            const base = Math.floor(riders.length / numHeats);
+                            const extra = riders.length % numHeats;
+                            let shuffled = this.shuffle([...riders]);
+                            let rIdx = 0;
+                            for (let h = 1; h <= numHeats; h++) {
+                                const size = h <= extra ? base + 1 : base;
+                                allMotos.push({
+                                    category: cat, round: round, heatNumber: globalHeatCounter++,
+                                    riders: shuffled.slice(rIdx, rIdx + size).map(r => ({ ...r, result: null }))
+                                });
+                                rIdx += size;
+                            }
+                        });
+                    }
+                    
+                    const { error } = await supabaseClient
+                        .from('events')
+                        .update({ motos: allMotos, knockouts: [] })
+                        .eq('id', this.activeEvent.id);
+                    
+                    if (error) alert(error.message);
+                    else await this.loadData();
+                    this.loading = false;
+                },
+
+                async saveResults() {
+                    const { error } = await supabaseClient
+                        .from('events')
+                        .update({ 
+                            motos: this.activeEvent.motos,
+                            knockouts: this.activeEvent.knockouts 
+                        })
+                        .eq('id', this.activeEvent.id);
+                    if (error) console.error(error.message);
+                },
+
+                async generateNextPhase() {
+                    this.loading = true;
+                    const cats = this.getActiveCategories();
+                    let newKnockouts = [];
+                    cats.forEach(cat => {
+                        const lastKnockouts = this.activeEvent.knockouts.filter(k => k.category === cat);
+                        let qualified = [];
+                        let nextPhaseName = '';
+                        if (lastKnockouts.length === 0) {
+                            qualified = this.getQualifiedFromMotos(cat);
+                            nextPhaseName = this.getInitialKnockoutPhase(qualified.length);
+                        } else {
+                            const currentPhase = lastKnockouts[lastKnockouts.length - 1].phase;
+                            if (currentPhase === 'Final') return;
+                            qualified = this.getQualifiedFromKnockout(cat, currentPhase);
+                            nextPhaseName = this.getNextPhaseName(currentPhase);
+                        }
+                        if (nextPhaseName && qualified.length > 0) {
+                            const numHeats = Math.ceil(qualified.length / 8);
+                            const base = Math.floor(qualified.length / numHeats);
+                            const extra = qualified.length % numHeats;
+                            let rIdx = 0;
+                            for (let h = 1; h <= numHeats; h++) {
+                                const size = h <= extra ? base + 1 : base;
+                                newKnockouts.push({
+                                    category: cat, phase: nextPhaseName, heatNumber: this.activeEvent.knockouts.length + newKnockouts.length + 1,
+                                    riders: qualified.slice(rIdx, rIdx + size).map(r => ({ ...r, result: null }))
+                                });
+                                rIdx += size;
+                            }
+                        }
+                    });
+                    
+                    const { error } = await supabaseClient
+                        .from('events')
+                        .update({ knockouts: [...this.activeEvent.knockouts, ...newKnockouts] })
+                        .eq('id', this.activeEvent.id);
+                    
+                    if (error) alert(error.message);
+                    else await this.loadData();
+                    this.loading = false;
+                },
+
+                getQualifiedFromMotos(category) {
+                    const riders = this.activeEvent.riders.filter(r => r.category === category);
+                    const rankings = riders.map(r => {
+                        let pts = 0;
+                        this.activeEvent.motos.filter(m => m.category === category).forEach(m => {
+                            pts += (m.riders.find(pr => pr.plate === r.plate)?.result || 9);
+                        });
+                        return { ...r, pts };
+                    }).sort((a,b) => a.pts - b.pts);
+                    const n = riders.length;
+                    if (n <= 8) return rankings;
+                    if (n <= 16) return rankings.slice(0, 8);
+                    if (n <= 32) return rankings.slice(0, 16);
+                    return rankings.slice(0, 32);
+                },
+
+                getQualifiedFromKnockout(category, phase) {
+                    const heats = this.activeEvent.knockouts.filter(k => k.category === category && k.phase === phase);
+                    let qualified = [];
+                    heats.forEach(h => {
+                        const sorted = h.riders.filter(r => r.result).sort((a,b) => a.result - b.result);
+                        qualified = [...qualified, ...sorted.slice(0, 4)];
+                    });
+                    return qualified;
+                },
+
+                getInitialKnockoutPhase(num) {
+                    if (num > 16) return 'Quartas';
+                    if (num > 8) return 'Semi';
+                    return 'Final';
+                },
+
+                getNextPhaseName(current) {
+                    if (current === 'Quartas') return 'Semi';
+                    if (current === 'Semi') return 'Final';
+                    return '';
+                },
+
+                hasFinalResults(category) {
+                    return this.activeEvent?.knockouts.some(k => k.category === category && k.phase === 'Final' && k.riders.some(r => r.result !== null));
+                },
+
+                calculateCategoryRankings(category) {
+                    const riders = this.activeEvent.riders.filter(r => r.category === category);
+                    return riders.map(r => {
+                        let motoPoints = 0;
+                        this.activeEvent.motos.filter(m => m.category === category).forEach(m => {
+                            motoPoints += (m.riders.find(pr => pr.plate === r.plate)?.result || 9);
+                        });
+                        let lastPhase = 'MOTOS';
+                        let finalPosition = null;
+                        ['Quartas', 'Semi', 'Final'].forEach(ph => {
+                            const moto = this.activeEvent.knockouts.find(k => k.category === category && k.phase === ph && k.riders.some(pr => pr.plate === r.plate));
+                            if (moto) {
+                                lastPhase = ph.toUpperCase();
+                                const res = moto.riders.find(pr => pr.plate === r.plate).result;
+                                if (ph === 'Final') finalPosition = res;
+                            }
+                        });
+                        return { ...r, motoPoints, lastPhase, finalPosition };
+                    }).sort((a, b) => {
+                        if (a.finalPosition && b.finalPosition) return a.finalPosition - b.finalPosition;
+                        if (a.finalPosition && !b.finalPosition) return -1;
+                        if (!a.finalPosition && b.finalPosition) return 1;
+                        const phaseWeight = { 'FINAL': 3, 'SEMI': 2, 'QUARTAS': 1, 'MOTOS': 0 };
+                        if (phaseWeight[a.lastPhase] !== phaseWeight[b.lastPhase]) return phaseWeight[b.lastPhase] - phaseWeight[a.lastPhase];
+                        return a.motoPoints - b.motoPoints;
+                    });
+                },
+
+                getActiveCategories() { return [...new Set(this.activeEvent?.riders.map(r => r.category) || [])].sort(); },
+                groupBy(arr, key) { return arr.reduce((acc, obj) => { (acc[obj[key]] = acc[obj[key]] || []).push(obj); return acc; }, {}); },
+                shuffle(array) { for (let i = array.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [array[i], array[j]] = [array[j], array[i]]; } return array; }
+            }
+        }
+    </script>
+</body>
+</html>
